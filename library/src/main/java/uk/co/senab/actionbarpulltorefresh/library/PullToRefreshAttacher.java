@@ -173,6 +173,8 @@ public class PullToRefreshAttacher {
      * @param newConfig The new configuration
      */
     public void onConfigurationChanged(Configuration newConfig) {
+        if (mIsDestroyed) return;  // We've been destroyed, nothing to do
+        
         mHeaderTransformer.onConfigurationChanged(mActivity, newConfig);
     }
 
