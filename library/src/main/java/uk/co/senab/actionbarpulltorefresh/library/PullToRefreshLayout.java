@@ -61,7 +61,7 @@ public class PullToRefreshLayout extends FrameLayout {
     /**
      * Manually set this Attacher's refreshing state. The header will be
      * displayed or hidden as requested.
-     *
+     * 
      * @param refreshing
      *            - Whether the attacher should be in a refreshing state,
      */
@@ -81,7 +81,7 @@ public class PullToRefreshLayout extends FrameLayout {
     /**
      * Call this when your refresh is complete and this view should reset itself
      * (header view will be hidden).
-     *
+     * 
      * This is the equivalent of calling <code>setRefreshing(false)</code>.
      */
     public final void setRefreshComplete() {
@@ -92,7 +92,7 @@ public class PullToRefreshLayout extends FrameLayout {
     /**
      * Set a {@link uk.co.senab.actionbarpulltorefresh.library.listeners.HeaderViewListener} which is called when the visibility
      * state of the Header View has changed.
-     *
+     * 
      * @param listener
      */
     public final void setHeaderViewListener(HeaderViewListener listener) {
@@ -143,6 +143,11 @@ public class PullToRefreshLayout extends FrameLayout {
     @Override
     public FrameLayout.LayoutParams generateLayoutParams(AttributeSet attrs) {
         return new PullToRefreshLayout.LayoutParams(getContext(), attrs);
+    }
+
+    public boolean isAttacherActive() {
+        return (mPullToRefreshAttacher != null && !mPullToRefreshAttacher
+                .isDestroyed());
     }
 
     @Override
