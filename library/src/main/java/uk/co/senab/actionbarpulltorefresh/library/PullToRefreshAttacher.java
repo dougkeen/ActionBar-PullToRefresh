@@ -16,7 +16,6 @@
 
 package uk.co.senab.actionbarpulltorefresh.library;
 
-import android.annotation.TargetApi;
 import android.app.ActionBar;
 import android.app.Activity;
 import android.content.Context;
@@ -24,6 +23,7 @@ import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.os.Build;
+import android.os.Handler;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -39,7 +39,6 @@ import uk.co.senab.actionbarpulltorefresh.library.listeners.HeaderViewListener;
 import uk.co.senab.actionbarpulltorefresh.library.listeners.OnRefreshListener;
 import uk.co.senab.actionbarpulltorefresh.library.viewdelegates.ViewDelegate;
 
-@TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
 public class PullToRefreshAttacher {
 
     private static final boolean DEBUG = false;
@@ -74,12 +73,9 @@ public class PullToRefreshAttacher {
     private final int[] mViewLocationResult = new int[2];
     private final Rect mRect = new Rect();
 
-    private final AddHeaderViewRunnable mAddHeaderViewRunnable;
+    private final Handler mHandler = new Handler();
 
     protected PullToRefreshAttacher(Activity activity, Options options) {
-        if (activity == null) {
-            throw new IllegalArgumentException("activity cannot be null");
-        }
         if (options == null) {
             Log.i(LOG_TAG, "Given null options so using default options.");
             options = new Options();
@@ -95,20 +91,19 @@ public class PullToRefreshAttacher {
         mRefreshMinimize = options.refreshMinimize;
 
         // EnvironmentDelegate
-        mEnvironmentDelegate = options.environmentDelegate != null
-                ? options.environmentDelegate
+        mEnvironmentDelegate = options.environmentDelegate != null ? options.environmentDelegate
                 : createDefaultEnvironmentDelegate();
 
         // Header Transformer
-        mHeaderTransformer = options.headerTransformer != null
-                ? options.headerTransformer
+        mHeaderTransformer = options.headerTransformer != null ? options.headerTransformer
                 : createDefaultHeaderTransformer();
 
         // Get touch slop for use later
         mTouchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
 
         // Get Window Decor View
-        final ViewGroup decorView = (ViewGroup) activity.getWindow().getDecorView();
+        final ViewGroup decorView = (ViewGroup) activity.getWindow()
+                .getDecorView();
 
         // Create Header view and then add to Decor View
         mHeaderView = LayoutInflater.from(
@@ -124,8 +119,18 @@ public class PullToRefreshAttacher {
         mHeaderTransformer.onViewCreated(activity, mHeaderView);
 
         // Now HeaderView to Activity
-        mAddHeaderViewRunnable = new AddHeaderViewRunnable();
-        mAddHeaderViewRunnable.start();
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (decorView.getWindowToken() != null) {
+                    // The Decor View has a Window Token, so we can add the HeaderView!
+                    addHeaderViewToActivity(mHeaderView, mActivity);
+                } else {
+                    // The Decor View doesn't have a Window Token yet, post ourselves again...
+                    mHandler.post(this);
+                }
+            }
+        });
     }
 
     /**
@@ -215,7 +220,7 @@ public class PullToRefreshAttacher {
         if (mIsDestroyed) return; // We've already been destroyed
 
         // Remove the Header View from the Activity
-        removeHeaderViewFromActivity(mHeaderView);
+        removeHeaderViewFromActivity(mHeaderView, mActivity);
 
         // Lets clear out all of our internal state
         clearRefreshableViews();
@@ -232,6 +237,8 @@ public class PullToRefreshAttacher {
     /**
      * Set a {@link HeaderViewListener} which is called when the visibility
      * state of the Header View has changed.
+     *
+     * @param listener
      */
     final void setHeaderViewListener(HeaderViewListener listener) {
         mHeaderViewListener = listener;
@@ -273,7 +280,7 @@ public class PullToRefreshAttacher {
                     final float yDiff = y - mInitialMotionY;
                     final float xDiff = x - mInitialMotionX;
 
-                    if (Math.abs(yDiff) > Math.abs(xDiff) && yDiff > mTouchSlop) {
+                    if (yDiff > xDiff && yDiff > mTouchSlop) {
                         mIsBeingDragged = true;
                         onPullStarted(y);
                     } else if (yDiff < -mTouchSlop) {
@@ -450,7 +457,6 @@ public class PullToRefreshAttacher {
     }
 
     void showHeaderView() {
-        updateHeaderViewPosition(mHeaderView);
         if (mHeaderTransformer.showHeaderView()) {
             if (mHeaderViewListener != null) {
                 mHeaderViewListener.onStateChanged(mHeaderView,
@@ -468,7 +474,7 @@ public class PullToRefreshAttacher {
         }
     }
 
-    protected final Activity getAttachedActivity() {
+    final Activity getAttachedActivity() {
         return mActivity;
     }
 
@@ -542,7 +548,7 @@ public class PullToRefreshAttacher {
 
         // Remove any minimize callbacks
         if (mRefreshMinimize) {
-            getHeaderView().removeCallbacks(mRefreshMinimizeRunnable);
+            mHandler.removeCallbacks(mRefreshMinimizeRunnable);
         }
 
         // Hide Header View
@@ -569,9 +575,9 @@ public class PullToRefreshAttacher {
         // Post a runnable to minimize the refresh header
         if (mRefreshMinimize) {
             if (mRefreshMinimizeDelay > 0) {
-                getHeaderView().postDelayed(mRefreshMinimizeRunnable, mRefreshMinimizeDelay);
+                mHandler.postDelayed(mRefreshMinimizeRunnable, mRefreshMinimizeDelay);
             } else {
-                getHeaderView().post(mRefreshMinimizeRunnable);
+                mHandler.post(mRefreshMinimizeRunnable);
             }
         }
     }
@@ -583,56 +589,40 @@ public class PullToRefreshAttacher {
         return mIsDestroyed;
     }
 
-    protected void addHeaderViewToActivity(View headerView) {
+    protected void addHeaderViewToActivity(View headerViewLayout, Activity activity) {
         // Get the Display Rect of the Decor View
-        mActivity.getWindow().getDecorView().getWindowVisibleDisplayFrame(mRect);
+        final View decorView = activity.getWindow().getDecorView();
+        final Rect visibleRect = new Rect();
+        decorView.getWindowVisibleDisplayFrame(visibleRect);
 
         // Honour the requested layout params
         int width = WindowManager.LayoutParams.MATCH_PARENT;
         int height = WindowManager.LayoutParams.WRAP_CONTENT;
-        ViewGroup.LayoutParams requestedLp = headerView.getLayoutParams();
+        ViewGroup.LayoutParams requestedLp = headerViewLayout.getLayoutParams();
         if (requestedLp != null) {
             width = requestedLp.width;
             height = requestedLp.height;
         }
 
         // Create LayoutParams for adding the View as a panel
-        WindowManager.LayoutParams wlp = new WindowManager.LayoutParams(width, height,
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(width, height,
                 WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                 PixelFormat.TRANSLUCENT);
-        wlp.x = 0;
-        wlp.y = mRect.top;
-        wlp.gravity = Gravity.TOP;
+        params.x = 0;
+        params.y = visibleRect.top;
+        params.gravity = Gravity.TOP;
 
-        // Workaround for Issue #182
-        headerView.setTag(wlp);
-        mActivity.getWindowManager().addView(headerView, wlp);
+        activity.getWindowManager().addView(headerViewLayout, params);
     }
 
-    protected void updateHeaderViewPosition(View headerView) {
-        // Refresh the Display Rect of the Decor View
-        mActivity.getWindow().getDecorView().getWindowVisibleDisplayFrame(mRect);
-
-        WindowManager.LayoutParams wlp = null;
-        if (headerView.getLayoutParams() instanceof WindowManager.LayoutParams) {
-            wlp = (WindowManager.LayoutParams) headerView.getLayoutParams();
-        } else if (headerView.getTag() instanceof  WindowManager.LayoutParams) {
-            wlp = (WindowManager.LayoutParams) headerView.getTag();
-        }
-
-        if (wlp != null && wlp.y != mRect.top) {
-            wlp.y = mRect.top;
-            mActivity.getWindowManager().updateViewLayout(headerView, wlp);
-        }
-    }
-
-    protected void removeHeaderViewFromActivity(View headerView) {
-        mAddHeaderViewRunnable.finish();
-
-        if (headerView.getWindowToken() != null) {
-            mActivity.getWindowManager().removeViewImmediate(headerView);
+    protected void removeHeaderViewFromActivity(View headerViewLayout,
+            Activity activity) {
+        try {
+        activity.getWindowManager().removeViewImmediate(headerViewLayout);
+        } catch (IllegalArgumentException e) {
+            Log.w("ActionBarPullToRefresh",
+                    "Could not remove pull to refresh header from activity", e);
         }
     }
 
@@ -642,31 +632,4 @@ public class PullToRefreshAttacher {
             minimizeHeader();
         }
     };
-
-    private class AddHeaderViewRunnable implements Runnable {
-        @Override
-        public void run() {
-            if (isDestroyed()) return;
-
-            if (getDecorView().getWindowToken() != null) {
-                // The Decor View has a Window Token, so we can add the HeaderView!
-                addHeaderViewToActivity(mHeaderView);
-            } else {
-                // The Decor View doesn't have a Window Token yet, post ourselves again...
-                start();
-            }
-        }
-
-        public void start() {
-            getDecorView().post(this);
-        }
-
-        public void finish() {
-            getDecorView().removeCallbacks(this);
-        }
-
-        private View getDecorView() {
-            return getAttachedActivity().getWindow().getDecorView();
-        }
-    }
 }
